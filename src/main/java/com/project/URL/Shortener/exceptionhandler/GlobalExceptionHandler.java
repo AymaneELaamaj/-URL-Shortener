@@ -1,6 +1,7 @@
 package com.project.URL.Shortener.exceptionhandler;
 
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -25,6 +26,15 @@ public class GlobalExceptionHandler {
         });
         return new ResponseEntity<>(errors, HttpStatus.BAD_REQUEST);
     }
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
+    Map<String, String> errors = new HashMap<>();
+
+    errors.put("error", "Duplicate value violates unique constraint");
+
+    return new ResponseEntity<>(errors, HttpStatus.BAD_REQUEST);
+}
+
 
     // You can add more exception handlers later if needed
 }
