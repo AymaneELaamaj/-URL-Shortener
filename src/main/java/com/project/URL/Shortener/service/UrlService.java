@@ -8,6 +8,5 @@ public interface UrlService {
     Url saveUrl(Url url);
     List<Url> getAll();
     Url getUrlByShortCode(String code);
-    void incrementClick(String code);
 
 }
