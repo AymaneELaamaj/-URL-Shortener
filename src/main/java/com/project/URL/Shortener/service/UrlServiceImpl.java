@@ -3,8 +3,10 @@ package com.project.URL.Shortener.service;
 import com.project.URL.Shortener.entity.Url;
 import com.project.URL.Shortener.repository.UrlRepo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.scheduling.annotation.Async;
 
 import java.util.List;
 import java.util.Optional;
@@ -17,11 +19,14 @@ public class UrlServiceImpl implements UrlService {
     private final UrlRepo urlRepo;
     private final RedisTemplate<String, Url> redisTemplate;
     private final PerformanceLogService performanceLogService;
+    private final RedisTemplate<String, Long> clickRedisTemplate;
 
-    public UrlServiceImpl(UrlRepo urlRepo, RedisTemplate<String, Url> redisTemplate, PerformanceLogService performanceLogService) {
+    public UrlServiceImpl(UrlRepo urlRepo, RedisTemplate<String, Url> redisTemplate,@Qualifier("clickCounterRedisTemplate") RedisTemplate<String, Long> clickRedisTemplate
+, PerformanceLogService performanceLogService) {
         this.urlRepo = urlRepo;
         this.redisTemplate = redisTemplate;
         this.performanceLogService = performanceLogService;
+        this.clickRedisTemplate=clickRedisTemplate;
         
     }
 
@@ -126,43 +131,17 @@ public class UrlServiceImpl implements UrlService {
      * Async click increment - separates click tracking from read path
      * This prevents click updates from slowing down redirects
      */
-    private void incrementClickAsync(String code) {
-        // Run in separate thread to not block the redirect response
-        new Thread(() -> {
-            try {
-                long startTime = System.currentTimeMillis();
 
-                // 1. Find the URL by short code
-                Optional<Url> urlOptional = urlRepo.findByShortCode(code);
-
-                if (urlOptional.isPresent()) {
-                    // 2. Increment click count
-                    Url url = urlOptional.get();
-                    url.setClickCount(url.getClickCount() + 1);
-
-                    // 3. Save back to database
-                    urlRepo.save(url);
-
-                    // 4. Log the operation timing
-                    long executionTime = System.currentTimeMillis() - startTime;
-                    performanceLogService.logDatabaseQuery(code, "INCREMENT_CLICKS", executionTime);
-
-                    // 5. Update cache with new click count (keep cache fresh)
-                    String redisKey = "short:" + code;
-                    redisTemplate.opsForValue().set(redisKey, url, 24, TimeUnit.HOURS);
-
-                    performanceLogService.logCacheStore(code, url.getOriginalUrl());
-
-                } else {
-                    // URL not found - log error
-                    performanceLogService.logError("INCREMENT_CLICKS", code,
-                            new RuntimeException("URL not found for click increment"));
-                }
-
-            } catch (Exception e) {
-                // Log any errors that occur during click increment
-                performanceLogService.logError("INCREMENT_CLICKS", code, e);
-            }
-        }).start(); // 🚨 Start the thread immediately
+    @Async
+    public void incrementClickAsync(String code) {
+        try {
+            String redisKey = "click:" + code;
+            clickRedisTemplate.opsForValue().increment(redisKey, 1);
+            clickRedisTemplate.expire(redisKey, 24, TimeUnit.HOURS);
+        } catch (Exception e) {
+            performanceLogService.logError("INCREMENT_CLICKS", code, e);
+        }
     }
+
+
 }
