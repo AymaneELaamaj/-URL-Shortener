@@ -144,4 +144,107 @@ public class UrlServiceImpl implements UrlService {
     }
 
 
+    // Ajouter ces méthodes dans UrlServiceImpl:
+
+    @Override
+    public Url updateUrl(String shortCode, Url updatedUrl) {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            performanceLogService.logRequestStart("UPDATE_URL", shortCode, "");
+
+            // 1. Vérifier que l'URL existe
+            Optional<Url> existingUrlOpt = urlRepo.findByShortCode(shortCode);
+            if (!existingUrlOpt.isPresent()) {
+                performanceLogService.logError("UPDATE_URL", shortCode,
+                        new RuntimeException("URL not found for update"));
+                return null;
+            }
+
+            // 2. Update en base de données
+            long dbStartTime = System.currentTimeMillis();
+            Url existingUrl = existingUrlOpt.get();
+            existingUrl.setOriginalUrl(updatedUrl.getOriginalUrl());
+            // Garder les autres champs (clickCount, createdAt, etc.)
+
+            Url savedUrl = urlRepo.save(existingUrl);
+            long dbTime = System.currentTimeMillis() - dbStartTime;
+
+            performanceLogService.logDatabaseQuery(shortCode, "UPDATE", dbTime);
+
+            // 3. 🚨 CACHE INVALIDATION - Supprimer de Redis
+            long cacheStartTime = System.currentTimeMillis();
+            String redisKey = "short:" + shortCode;
+            Boolean deleted = redisTemplate.delete(redisKey);
+            long cacheTime = System.currentTimeMillis() - cacheStartTime;
+
+            if (deleted) {
+                performanceLogService.logCacheStore(shortCode, "CACHE_INVALIDATED");
+            } else {
+                performanceLogService.logCacheMiss(shortCode, "CACHE_NOT_FOUND_FOR_INVALIDATION");
+            }
+
+            // 4. Log completion
+            long totalTime = System.currentTimeMillis() - startTime;
+            performanceLogService.logRequestComplete("UPDATE_URL", shortCode, totalTime);
+
+            return savedUrl;
+
+        } catch (Exception e) {
+            performanceLogService.logError("UPDATE_URL", shortCode, e);
+            throw e;
+        }
+    }
+
+    @Override
+    public boolean deleteUrl(String shortCode) {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            performanceLogService.logRequestStart("DELETE_URL", shortCode, "");
+
+            // 1. Vérifier que l'URL existe
+            Optional<Url> existingUrlOpt = urlRepo.findByShortCode(shortCode);
+            if (!existingUrlOpt.isPresent()) {
+                performanceLogService.logError("DELETE_URL", shortCode,
+                        new RuntimeException("URL not found for deletion"));
+                return false;
+            }
+
+            // 2. Delete de la base de données
+            long dbStartTime = System.currentTimeMillis();
+            urlRepo.deleteById(existingUrlOpt.get().getId());
+            long dbTime = System.currentTimeMillis() - dbStartTime;
+
+            performanceLogService.logDatabaseQuery(shortCode, "DELETE", dbTime);
+
+            // 3. 🚨 CACHE INVALIDATION - Supprimer de Redis
+            long cacheStartTime = System.currentTimeMillis();
+            String redisKey = "short:" + shortCode;
+            Boolean deleted = redisTemplate.delete(redisKey);
+            long cacheTime = System.currentTimeMillis() - cacheStartTime;
+
+            if (deleted) {
+                performanceLogService.logCacheStore(shortCode, "CACHE_INVALIDATED");
+            } else {
+                performanceLogService.logCacheMiss(shortCode, "CACHE_NOT_FOUND_FOR_INVALIDATION");
+            }
+
+            // 4. Aussi supprimer les compteurs de clics Redis
+            String clickKey = "click:" + shortCode;
+            clickRedisTemplate.delete(clickKey);
+
+            // 5. Log completion
+            long totalTime = System.currentTimeMillis() - startTime;
+            performanceLogService.logRequestComplete("DELETE_URL", shortCode, totalTime);
+
+            return true;
+
+        } catch (Exception e) {
+            performanceLogService.logError("DELETE_URL", shortCode, e);
+            throw e;
+        }
+    }
+
+
 }

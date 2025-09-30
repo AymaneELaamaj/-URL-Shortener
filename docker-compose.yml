@@ -1,0 +1,30 @@
+
+services:
+  redis-shard-1:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  redis-shard-2:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+
+  redis-shard-3:
+    image: redis:7-alpine
+    ports:
+      - "6381:6379"
+
+  redis-shard-4:
+    image: redis:7-alpine
+    ports:
+      - "6382:6379"
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: url_base
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: aymaneelaamaj
+    ports:
+      - "5432:5432"

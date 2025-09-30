@@ -8,5 +8,8 @@ public interface UrlService {
     Url saveUrl(Url url);
     List<Url> getAll();
     Url getUrlByShortCode(String code);
+    Url updateUrl(String shortCode, Url updatedUrl);
+    boolean deleteUrl(String shortCode);
+
 
 }

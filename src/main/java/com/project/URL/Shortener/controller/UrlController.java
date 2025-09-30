@@ -63,6 +63,40 @@ public class UrlController {
                 .build();
     }
 
+
+    // Ajouter ces méthodes dans UrlController:
+
+    @PutMapping("/{code}")
+    public ResponseEntity<Url> updateUrl(@PathVariable String code,
+                                         @Valid @RequestBody Url updatedUrl,
+                                         HttpServletRequest request) {
+        String clientIp = getClientIp(request);
+        performanceLogService.logRequestStart("UPDATE", code, clientIp);
+
+        Url result = urlService.updateUrl(code, updatedUrl);
+
+        if (result == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(result);
+    }
+
+    @DeleteMapping("/{code}")
+    public ResponseEntity<Void> deleteUrl(@PathVariable String code,
+                                          HttpServletRequest request) {
+        String clientIp = getClientIp(request);
+        performanceLogService.logRequestStart("DELETE", code, clientIp);
+
+        boolean deleted = urlService.deleteUrl(code);
+
+        if (!deleted) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.noContent().build();
+    }
+
     private String getClientIp(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
