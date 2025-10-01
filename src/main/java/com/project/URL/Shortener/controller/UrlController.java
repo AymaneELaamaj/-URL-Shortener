@@ -106,8 +106,6 @@ public class UrlController {
             return ResponseEntity.notFound().build();
         }
 
-        // 2. Invalidate cache (force reload on next access)
-        redisService.delete(code);
 
         performanceLogService.logRequestComplete("UPDATE", code, 0);
         return ResponseEntity.ok(result);
@@ -127,8 +125,6 @@ public class UrlController {
             return ResponseEntity.notFound().build();
         }
 
-        // 2. Delete from cache
-        redisService.delete(code);
 
         performanceLogService.logRequestComplete("DELETE", code, 0);
         return ResponseEntity.noContent().build();
