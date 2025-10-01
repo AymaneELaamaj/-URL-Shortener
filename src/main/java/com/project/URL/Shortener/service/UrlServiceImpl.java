@@ -15,19 +15,18 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class UrlServiceImpl implements UrlService {
 
-    
+
     private final UrlRepo urlRepo;
-    private final RedisTemplate<String, Url> redisTemplate;
     private final PerformanceLogService performanceLogService;
     private final RedisTemplate<String, Long> clickRedisTemplate;
-
-    public UrlServiceImpl(UrlRepo urlRepo, RedisTemplate<String, Url> redisTemplate,@Qualifier("clickCounterRedisTemplate") RedisTemplate<String, Long> clickRedisTemplate
+    private  final RedisService redisService;
+    public UrlServiceImpl(RedisService redisService,UrlRepo urlRepo,@Qualifier("clickCounterRedisTemplate") RedisTemplate<String, Long> clickRedisTemplate
 , PerformanceLogService performanceLogService) {
         this.urlRepo = urlRepo;
-        this.redisTemplate = redisTemplate;
         this.performanceLogService = performanceLogService;
         this.clickRedisTemplate=clickRedisTemplate;
-        
+        this.redisService=redisService;
+
     }
 
     @Override
@@ -41,89 +40,40 @@ public class UrlServiceImpl implements UrlService {
 
     @Override
     public List<Url> getAll() {
-        
+
         // Return all URLs
         return urlRepo.findAll();
     }
 
     @Override
+    // SOLUTION : Modifier UrlServiceImpl pour utiliser RedisService
+
     public Url getUrlByShortCode(String code) {
         long startTime = System.currentTimeMillis();
-        long cacheTime = 0;
-        long dbTime = 0;
-        boolean cacheUsed = false;
 
-        try {
-            // 1. Log request start
-            performanceLogService.logRequestStart("GET_URL", code, "");
+        // ✅ UTILISER RedisService (sharding) au lieu de redisTemplate direct
+        Url cachedUrl = redisService.get(code);  // ← CHANGEMENT CRITIQUE
 
-            String redisKey = "short:" + code;
-
-            // 2. Try Redis cache first (with timing)
-            long cacheStartTime = System.currentTimeMillis();
-            Url cachedUrl = redisTemplate.opsForValue().get(redisKey);
-            cacheTime = System.currentTimeMillis() - cacheStartTime;
-
-            if (cachedUrl != null) {
-                // 3. Cache HIT - return immediately
-                performanceLogService.logCacheHit(code, "GET_URL");
-                cacheUsed = true;
-
-                // Increment click count in background (doesn't block response)
-                incrementClickAsync(code);
-
-                // Log performance and complete
-                long totalTime = System.currentTimeMillis() - startTime;
-                performanceLogService.logPerformanceMetrics("GET_URL", cacheTime, dbTime, cacheUsed);
-                performanceLogService.logRequestComplete("GET_URL", code, totalTime);
-
-                return cachedUrl;
-            }
-
-            // 4. Cache MISS - query database
-            performanceLogService.logCacheMiss(code, "GET_URL");
-
-            long dbStartTime = System.currentTimeMillis();
-            Optional<Url> urlOptional = urlRepo.findByShortCode(code);
-            dbTime = System.currentTimeMillis() - dbStartTime;
-
-            if (urlOptional.isPresent()) {
-                // 5. Found in database
-                Url urlFromDb = urlOptional.get();
-
-                performanceLogService.logDatabaseQuery(code, "SELECT_BY_CODE", dbTime);
-
-                // Store in cache for next time
-                long cacheStoreStart = System.currentTimeMillis();
-                redisTemplate.opsForValue().set(redisKey, urlFromDb, 24, TimeUnit.HOURS);
-                long cacheStoreTime = System.currentTimeMillis() - cacheStoreStart;
-
-                performanceLogService.logCacheStore(code, urlFromDb.getOriginalUrl());
-
-                // Increment click count in background
-                incrementClickAsync(code);
-
-                // Log performance metrics
-                long totalTime = System.currentTimeMillis() - startTime;
-                performanceLogService.logPerformanceMetrics("GET_URL", cacheTime + cacheStoreTime, dbTime, cacheUsed);
-                performanceLogService.logRequestComplete("GET_URL", code, totalTime);
-
-                return urlFromDb;
-            }
-
-            // 6. Not found anywhere
-            performanceLogService.logDatabaseQuery(code, "SELECT_NOT_FOUND", dbTime);
-
-            long totalTime = System.currentTimeMillis() - startTime;
-            performanceLogService.logRequestComplete("GET_URL", code, totalTime);
-
-            return null;
-
-        } catch (Exception e) {
-            // 7. Handle any errors
-            performanceLogService.logError("GET_URL", code, e);
-            throw e;
+        if (cachedUrl != null) {
+            // Cache HIT - return
+            incrementClickAsync(code);
+            return cachedUrl;
         }
+
+        // Cache MISS - query database
+        Optional<Url> urlOptional = urlRepo.findByShortCode(code);
+
+        if (urlOptional.isPresent()) {
+            Url urlFromDb = urlOptional.get();
+
+            // ✅ UTILISER RedisService pour stocker
+            redisService.set(code, urlFromDb);  // ← CHANGEMENT CRITIQUE
+
+            incrementClickAsync(code);
+            return urlFromDb;
+        }
+
+        return null;
     }
 
 
@@ -174,15 +124,10 @@ public class UrlServiceImpl implements UrlService {
 
             // 3. 🚨 CACHE INVALIDATION - Supprimer de Redis
             long cacheStartTime = System.currentTimeMillis();
-            String redisKey = "short:" + shortCode;
-            Boolean deleted = redisTemplate.delete(redisKey);
+            redisService.delete(shortCode);
             long cacheTime = System.currentTimeMillis() - cacheStartTime;
 
-            if (deleted) {
-                performanceLogService.logCacheStore(shortCode, "CACHE_INVALIDATED");
-            } else {
-                performanceLogService.logCacheMiss(shortCode, "CACHE_NOT_FOUND_FOR_INVALIDATION");
-            }
+
 
             // 4. Log completion
             long totalTime = System.currentTimeMillis() - startTime;
@@ -220,15 +165,10 @@ public class UrlServiceImpl implements UrlService {
 
             // 3. 🚨 CACHE INVALIDATION - Supprimer de Redis
             long cacheStartTime = System.currentTimeMillis();
-            String redisKey = "short:" + shortCode;
-            Boolean deleted = redisTemplate.delete(redisKey);
+            redisService.delete(shortCode);
             long cacheTime = System.currentTimeMillis() - cacheStartTime;
 
-            if (deleted) {
-                performanceLogService.logCacheStore(shortCode, "CACHE_INVALIDATED");
-            } else {
-                performanceLogService.logCacheMiss(shortCode, "CACHE_NOT_FOUND_FOR_INVALIDATION");
-            }
+
 
             // 4. Aussi supprimer les compteurs de clics Redis
             String clickKey = "click:" + shortCode;
